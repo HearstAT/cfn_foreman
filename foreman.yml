@@ -202,8 +202,7 @@ Resources:
     Properties:
       EC2VpcId: !Ref VPC
       DBSecurityGroupIngress:
-        -
-          EC2SecurityGroupName: !Ref ServerSecurityGroup
+        - EC2SecurityGroupId: !Ref ServerSecurityGroup
       GroupDescription: "Frontend Access"
 
   ServerSecurityGroup:
@@ -286,15 +285,17 @@ Resources:
     Type: AWS::RDS::DBInstance
     Properties:
       # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
-      DBName: !Sub ${ForemanSubdomain}-db
+      DBInstanceIdentifier: !Sub ${ForemanSubdomain}-db
+      DBName: "foreman_db"
       AllocatedStorage: 50
       DBInstanceClass:  db.t2.small
-      Engine: PostgreSQL
-      EngineVersion: 9.5.2
+      Engine: "postgres"
+      EngineVersion: "9.5.2"
       MasterUsername: !Ref DBUser
       MasterUserPassword: !Ref DBPassword
       BackupRetentionPeriod: "30"
-      DBSecurityGroups: !Ref ForemanDBSecurityGroup
+      DBSecurityGroups:
+        - !Ref ForemanDBSecurityGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
       MonitoringInterval: 5
       Tags:
