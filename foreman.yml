@@ -1,0 +1,351 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "The Foreman on CentOS 7"
+Parameters:
+  VPC:
+    Description: Choose VPC to use
+    Type: AWS::EC2::VPC::Id
+    Default: ''
+
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - m3.medium
+      - m3.large
+      - m3.xlarge
+      - m3.2xlarge
+      - c3.large
+      - c3.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c4.large
+      - c4.xlarge
+      - c4.2xlarge
+      - c4.4xlarge
+      - c4.8xlarge
+      - g2.2xlarge
+      - r3.large
+      - r3.xlarge
+      - r3.2xlarge
+      - r3.4xlarge
+      - r3.8xlarge
+      - i2.xlarge
+      - i2.2xlarge
+      - i2.4xlarge
+      - i2.8xlarge
+      - d2.xlarge
+      - d2.2xlarge
+      - d2.4xlarge
+      - d2.8xlarge
+      - hi1.4xlarge
+      - hs1.8xlarge
+      - cr1.8xlarge
+      - cc2.8xlarge
+      - cg1.4xlarge
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+
+  SSHSecurityGroup:
+    Description: Select Security Group for SSH Access
+    Type: AWS::EC2::SecurityGroup::Id
+    Default: ''
+
+  CIDRA:
+    Type: String
+    Default: 172.33.10.0/24
+    Description: Subnet A CIDR Block
+
+  ForemanSubdomain:
+    Type: String
+    Default: Foreman-a
+    AllowedValues:
+      - Foreman-a
+      - Foreman-b
+      - Foreman-test
+    Description: subdomain/prefix for chose hosted zone used for staging
+
+  DBUser:
+    Type: String
+    Default: ''
+    Description: Enter DB User Name (Used for both existing and new DB)
+
+  DBPassword:
+    Type: String
+    NoEcho: 'true'
+    Default: ''
+    Description: Enter DB Password (Used for both existing and new DB)
+
+  HostedZone:
+    Type: String
+    Default: domain.com
+    Description: must match a route53 hosted domain/zone
+
+  ChefServerUrl:
+    Type: String
+    Default: chef.domain.com
+    Description: Enter the chef server url you wish to connect foreman to
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    -
+      Label:
+        default: Instance & Network Configuration
+      Parameters:
+        - InstanceType
+        - KeyName
+        - VPC
+        - HostedZone
+        - ForemanSubdomain
+        - SSHSecurityGroup
+        - CIDRA
+    -
+      Label:
+        default: Database Configuration
+      Parameters:
+        - DBUser
+        - DBPassword
+
+Mappings:
+  RegionMap:
+    us-west-2:
+      HVM64: ami-d2c924b2
+    eu-west-1:
+      HVM64: ami-7abd0209
+
+Resources:
+  # Create the necessary subnets for ELB
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      # Get Availability Zones and select first in string
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      CidrBlock: !Ref CIDRA
+      Tags:
+        - Name: Public-Subnet-A
+        - Application: !Ref AWS::StackId
+        - Network: "Public"
+
+  # Create the necessary subnet for RDS PostgreSQL
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Condition: DBCon
+    Properties:
+      DBSubnetGroupDescription: "Foreman DB Subnet Group"
+      SubnetIds:
+          - !Ref SubnetA
+          - !Ref SubnetB
+          - !Ref SubnetC
+      Tags:
+        -
+          # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+          Name: !Sub "${ForemanSubdomain} DB Subnet Group"
+
+  ForemanDBSecurityGroup:
+    Type: AWS::RDS::DBSecurityGroup
+    Condition: DBCon
+    Properties:
+      EC2VpcId: !Ref VPC
+      DBSecurityGroupIngress:
+        -
+          EC2SecurityGroupName: !Ref ServerSecurityGroup
+      GroupDescription: "Frontend Access"
+
+  ServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Setup Ingress/Egress for Servers
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: '0'
+          ToPort: '65535'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Name: Server-Security-Group
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+
+  # Just a placeholder role, please don't use this for real!
+  RolePolicies:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: "root"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Action: "*"
+            Resource: "*"
+      Roles:
+        - !Ref InstanceRole
+
+  InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Path: "/"
+      Roles:
+        -
+          !Ref InstanceRole
+
+  ForemanDNS:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+      HostedZoneName: !Sub "${HostedZone}."
+      Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} ELB.
+      RecordSets:
+          # Create DNS A Record by joining ForemanSubdomain + HostedZone
+        - Name: !Join [ '', [ !Ref ForemanSubdomain, ".", !Ref HostedZone, "." ] ]
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt PrimaryElasticLoadBalancer.CanonicalHostedZoneNameID
+            DNSName: !GetAtt PrimaryElasticLoadBalancer.CanonicalHostedZoneName
+
+
+  ForemanDB:
+    Type: AWS::RDS::DBInstance
+    # Conditional look up, if true then creates this resource.
+    Condition: DBCon
+    Properties:
+      # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+      DBName: !Sub ${ForemanSubdomain}-db
+      AllocatedStorage: 50
+      DBInstanceClass:  db.t2.large
+      Engine: PostgreSQL
+      EngineVersion: 9.5.2
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      BackupRetentionPeriod: "30"
+      DBSecurityGroups: !Ref ForemanDBSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MonitoringInterval: 5
+      Tags:
+        # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+        - Name: !Sub "${ForemanSubdomain} Database"
+    DeletionPolicy: "Snapshot"
+
+  Ec2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [ RegionMap, !Ref "AWS::Region", HVM64 ]
+      AssociatePublicIpAddress: 'true'
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+        - !Ref ServerSecurityGroup
+        - !Ref SSHSecurityGroup
+      KeyName: !Ref KeyName
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sda1"
+          Ebs:
+            VolumeSize: '15'
+      IamInstanceProfile: !Ref InstanceProfile
+      UserData:
+        # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+        # Since sub is being used, cannot use ${} for bash variables, only $VARIABLE won't trigger validation/build errors.
+        "Fn::Base64": !Sub |
+            #!/bin/bash -xev
+
+            DBENDPOINT="Fn::GetAtt": [ ForemanDB, Endpoint.Address ]
+            FOREMANURL="Fn::Join": [ '', [ ${ForemanSubdomain}, ".", ${HostedZone} ] ]
+            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+
+            yum -y upgrade
+            yum install -y wget curl python-setuptools python-pip git
+
+            # Install cfn bootstraping tools
+            if [ -z $(command -v cfn-signal) ]; then
+                easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+            fi
+
+            # Install AWS Cli Tools
+            if [ -z $(command -v aws) ]; then
+              pip install awscli
+            fi
+
+            # Helper function to set wait timer
+            error_exit()
+            {
+              /usr/local/bin/cfn-signal -e 1 -r $1 ${WaitHandle}
+              exit 1
+            }
+
+            # Install foreman epel repo and foreman installer
+            yum install -y centos-release-scl
+            yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm
+            yum install -y foreman-installer
+
+            # Install Foreman w/ Selected options
+            foreman-installer \
+              --no-enable-puppet \
+              --foreman-server-ssl-crl="" \
+              --foreman-db-type=postgresql \
+              --foreman-db-manage=false \
+              --foreman-db-host=$DBENDPOINT \
+              --foreman-db-database=${ForemanSubdomain}-db \
+              --foreman-db-username=${DBUser} \
+              --foreman-db-password=${DBPassword} \
+              --no-enable-foreman \
+              --no-enable-foreman-cli \
+              --no-enable-foreman-plugin-bootdisk \
+              --no-enable-foreman-plugin-setup \
+              --enable-foreman-proxy \
+              --foreman-proxy-tftp=false \
+              --foreman-proxy-foreman-base-url=https://$FOREMANURL \
+              --foreman-proxy-trusted-hosts=$FOREMANURL \
+              --foreman-proxy-register-in-foreman=false \
+              --enable-foreman-plugin-chef \
+              --enable-foreman-plugin-tasks \
+              --enable-foreman-proxy-plugin-chef \
+              --foreman-proxy-plugin-chef-listen-on=both \
+              --foreman-proxy-plugin-chef-server-url=c${ChefServerUrl} \
+              --foreman-proxy-plugin-chef-client-name="pivotal" \
+              --foreman-proxy-plugin-chef-private-key="/etc/opscode/pivotal.pem" \
+              || error_exit "Foreman Install Failed"
+
+            # Run foremand DB tasks
+            foreman-rake db:migrate || error_exit "db migrate failed for Foreman"
+            foreman-rake db:seed || error_exit "db seed failed for Foreman"
+            foreman-rake apipie:cache:index || error_exit "apipie cache index failed for foreman"
+
+            # All is well so signal success and let CF know wait function is complete
+            /usr/local/bin/cfn-signal -e 0 -r 'Server setup complete' ${WaitHandle}
+
+  # Wait setups to force EC2 instances to now show cloudformation complete until the Userdata (backend cookbook) has completely succesfully
+  WaitHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+  WaitCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn: Ec2Instance
+    Properties:
+      Handle:  !Ref WaitHandle
+      Timeout: '2300'
