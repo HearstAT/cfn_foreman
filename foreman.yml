@@ -76,13 +76,29 @@ Parameters:
   DBUser:
     Type: String
     Default: ''
-    Description: Enter DB User Name (Used for both existing and new DB)
+    Description: Enter DB User Name
 
   DBPassword:
     Type: String
     NoEcho: 'true'
     Default: ''
-    Description: Enter DB Password (Used for both existing and new DB)
+    Description: Enter DB Password
+
+  AdminUser:
+    Type: String
+    Default: ''
+    Description: Enter Foreman Admin User Name
+
+  AdminEmail:
+    Type: String
+    Default: ''
+    Description: Enter Foreman Admin Email
+
+  AdminPassword:
+    Type: String
+    NoEcho: 'true'
+    Default: ''
+    Description: Enter Foreman Admin Password
 
   HostedZone:
     Type: String
@@ -105,7 +121,6 @@ Metadata:
         - KeyName
         - VPC
         - HostedZone
-        - ForemanSubdomain
         - SSHSecurityGroup
         - CIDRA
     -
@@ -114,6 +129,15 @@ Metadata:
       Parameters:
         - DBUser
         - DBPassword
+    -
+      Label:
+        default: Foreman Configuration
+      Parameters:
+        - AdminUser
+        - AdminPassword
+        - AdminEmail
+        - ForemanSubdomain
+        - ChefServerUrl
 
 Mappings:
   RegionMap:
@@ -132,7 +156,8 @@ Resources:
       AvailabilityZone: !Select [ 0, !GetAZs "" ]
       CidrBlock: !Ref CIDRA
       Tags:
-        - Name: Public-Subnet-A
+        - Key: Name
+        - Value: Public-Subnet-A
         - Application: !Ref AWS::StackId
         - Network: "Public"
 
@@ -233,7 +258,7 @@ Resources:
       # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
       DBName: !Sub ${ForemanSubdomain}-db
       AllocatedStorage: 50
-      DBInstanceClass:  db.t2.large
+      DBInstanceClass:  db.t2.small
       Engine: PostgreSQL
       EngineVersion: 9.5.2
       MasterUsername: !Ref DBUser
@@ -300,6 +325,10 @@ Resources:
             # Install Foreman w/ Selected options
             foreman-installer \
               --no-enable-puppet \ # Disable Puppet
+              --foreman-authentication \ # Set foreman to authenticated users
+              --foreman-admin-username=${AdminUser} \ # Set Admin User
+              --foreman-admin-password=${AdminPassword} \ # Set Admin Password
+              --foreman-admin-email=${AdminEmail} \ # Set Admin Email
               --foreman-server-ssl-crl="" \ # Disable Puppet
               --foreman-db-type=postgresql \ # Enable External DB
               --foreman-db-manage=false \ # Enable External DB
