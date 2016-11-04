@@ -61,8 +61,13 @@ Parameters:
 
   CIDRA:
     Type: String
-    Default: 172.33.10.0/24
+    Default: 172.33.80.0/24
     Description: Subnet A CIDR Block
+
+  CIDRB:
+    Type: String
+    Default: 172.33.90.0/24
+    Description: Subnet B CIDR Block
 
   ForemanSubdomain:
     Type: String
@@ -123,6 +128,7 @@ Metadata:
         - HostedZone
         - SSHSecurityGroup
         - CIDRA
+        - CIDRB
     -
       Label:
         default: Database Configuration
@@ -147,7 +153,7 @@ Mappings:
       HVM64: ami-7abd0209
 
 Resources:
-  # Create the necessary subnets for ELB
+  # Create the necessary subnets for Instance and DB
   SubnetA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -163,6 +169,21 @@ Resources:
         - Key: Network
           Value: "Public"
 
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      # Get Availability Zones and select first in string
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      CidrBlock: !Ref CIDRB
+      Tags:
+        - Key: Name
+          Value: Public-Subnet-B
+        - Key: Application
+          Value: !Ref AWS::StackId
+        - Key: Network
+          Value: "Public"
+
   # Create the necessary subnet for RDS PostgreSQL
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -170,6 +191,7 @@ Resources:
       DBSubnetGroupDescription: "Foreman DB Subnet Group"
       SubnetIds:
           - !Ref SubnetA
+          - !Ref SubnetB
       Tags:
         # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
         - Key: Name
@@ -193,6 +215,11 @@ Resources:
         - IpProtocol: tcp
           FromPort: '80'
           ToPort: '80'
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
           CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
         - IpProtocol: tcp
