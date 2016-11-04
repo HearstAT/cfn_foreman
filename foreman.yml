@@ -299,30 +299,30 @@ Resources:
 
             # Install Foreman w/ Selected options
             foreman-installer \
-              --no-enable-puppet \
-              --foreman-server-ssl-crl="" \
-              --foreman-db-type=postgresql \
-              --foreman-db-manage=false \
-              --foreman-db-host=$DBENDPOINT \
-              --foreman-db-database=${ForemanSubdomain}-db \
-              --foreman-db-username=${DBUser} \
-              --foreman-db-password=${DBPassword} \
-              --no-enable-foreman \
-              --no-enable-foreman-cli \
-              --no-enable-foreman-plugin-bootdisk \
-              --no-enable-foreman-plugin-setup \
-              --enable-foreman-proxy \
-              --foreman-proxy-tftp=false \
-              --foreman-proxy-foreman-base-url=https://$FOREMANURL \
-              --foreman-proxy-trusted-hosts=$FOREMANURL \
-              --foreman-proxy-register-in-foreman=false \
-              --enable-foreman-plugin-chef \
-              --enable-foreman-plugin-tasks \
-              --enable-foreman-proxy-plugin-chef \
-              --foreman-proxy-plugin-chef-listen-on=both \
-              --foreman-proxy-plugin-chef-server-url=c${ChefServerUrl} \
-              --foreman-proxy-plugin-chef-client-name="pivotal" \
-              --foreman-proxy-plugin-chef-private-key="/etc/opscode/pivotal.pem" \
+              --no-enable-puppet \ # Disable Puppet
+              --foreman-server-ssl-crl="" \ # Disable Puppet
+              --foreman-db-type=postgresql \ # Enable External DB
+              --foreman-db-manage=false \ # Enable External DB
+              --foreman-db-host=$DBENDPOINT \ # Enable External DB
+              --foreman-db-database=${ForemanSubdomain}-db \ # Enable External DB
+              --foreman-db-username=${DBUser} \ # Enable External DB
+              --foreman-db-password=${DBPassword} \ # Enable External DB
+              --no-enable-foreman \ # Disable Install by Puppet
+              --no-enable-foreman-cli \ # Disable Install by Puppet
+              --no-enable-foreman-plugin-bootdisk \ # Disable Install by Puppet
+              --no-enable-foreman-plugin-setup \ # Disable Install by Puppet
+              --enable-foreman-proxy \ # Enable Smart Proxy
+              --foreman-proxy-tftp=false \ # Enable Smart Proxy
+              --foreman-proxy-foreman-base-url=https://$FOREMANURL \ # Enable Smart Proxy
+              --foreman-proxy-trusted-hosts=$FOREMANURL \ # Enable Smart Proxy
+              --foreman-proxy-register-in-foreman=false \ # Disable multi-foreman setups for now
+              --enable-foreman-plugin-chef \ # Enable Chef Plugin
+              --enable-foreman-plugin-tasks \ # Enable Chef Plugin Dep
+              --enable-foreman-proxy-plugin-chef \ # Enable Chef Plugin for Smart Proxy
+              --foreman-proxy-plugin-chef-listen-on=both \ # Enable Chef Plugin listener for HTTP/HTTPS
+              --foreman-proxy-plugin-chef-server-url=c${ChefServerUrl} \ # Enable Chef Plugin
+              --foreman-proxy-plugin-chef-client-name="pivotal" \ # Enable Chef Plugin for Global View
+              --foreman-proxy-plugin-chef-private-key="/etc/opscode/pivotal.pem" \ # Enable Chef Plugin for Global View
               || error_exit "Foreman Install Failed"
 
             # Run foremand DB tasks
