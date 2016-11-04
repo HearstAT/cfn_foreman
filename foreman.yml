@@ -139,13 +139,10 @@ Resources:
   # Create the necessary subnet for RDS PostgreSQL
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
-    Condition: DBCon
     Properties:
       DBSubnetGroupDescription: "Foreman DB Subnet Group"
       SubnetIds:
           - !Ref SubnetA
-          - !Ref SubnetB
-          - !Ref SubnetC
       Tags:
         -
           # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
@@ -153,7 +150,6 @@ Resources:
 
   ForemanDBSecurityGroup:
     Type: AWS::RDS::DBSecurityGroup
-    Condition: DBCon
     Properties:
       EC2VpcId: !Ref VPC
       DBSecurityGroupIngress:
@@ -218,24 +214,21 @@ Resources:
           !Ref InstanceRole
 
   ForemanDNS:
-    Type: AWS::Route53::RecordSetGroup
+    Type: AWS::Route53::RecordSet
     Properties:
       # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
       HostedZoneName: !Sub "${HostedZone}."
-      Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} ELB.
+      Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} Server.
       RecordSets:
           # Create DNS A Record by joining ForemanSubdomain + HostedZone
         - Name: !Join [ '', [ !Ref ForemanSubdomain, ".", !Ref HostedZone, "." ] ]
           Type: A
-          AliasTarget:
-            HostedZoneId: !GetAtt PrimaryElasticLoadBalancer.CanonicalHostedZoneNameID
-            DNSName: !GetAtt PrimaryElasticLoadBalancer.CanonicalHostedZoneName
-
+          TTL: "900"
+          ResourceRecords:
+            - !GetAtt Ec2Instance.PublicIp
 
   ForemanDB:
     Type: AWS::RDS::DBInstance
-    # Conditional look up, if true then creates this resource.
-    Condition: DBCon
     Properties:
       # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
       DBName: !Sub ${ForemanSubdomain}-db
