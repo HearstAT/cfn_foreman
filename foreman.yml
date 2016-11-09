@@ -353,9 +353,9 @@ Resources:
             }
 
             # Install foreman epel repo and foreman installer
-            yum install -y centos-release-scl
-            yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm
-            yum install -y foreman-installer
+            yum install -y centos-release-scl || error_exit "Failed to add scl release"
+            yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm || error_exit "Failed to install epel foreman"
+            yum install -y foreman-installer || error_exit "Failed to install foreman-installer via yum"
 
             # Install Foreman w/ Selected options
             foreman-installer \
