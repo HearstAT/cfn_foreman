@@ -273,13 +273,12 @@ Resources:
       # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
       HostedZoneName: !Sub "${HostedZone}."
       Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} Server.
-      RecordSets:
           # Create DNS A Record by joining ForemanSubdomain + HostedZone
-        - Name: !Join [ '', [ !Ref ForemanSubdomain, ".", !Ref HostedZone, "." ] ]
-          Type: A
-          TTL: "900"
-          ResourceRecords:
-            - !GetAtt Ec2Instance.PublicIp
+      Name: !Join [ '', [ !Ref ForemanSubdomain, ".", !Ref HostedZone, "." ] ]
+      Type: A
+      TTL: "900"
+      ResourceRecords:
+        - !GetAtt Ec2Instance.PublicIp
 
   ForemanDB:
     Type: AWS::RDS::DBInstance
@@ -308,12 +307,16 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !FindInMap [ RegionMap, !Ref "AWS::Region", HVM64 ]
-      AssociatePublicIpAddress: 'true'
       InstanceType: !Ref InstanceType
-      SecurityGroups:
-        - !Ref ServerSecurityGroup
-        - !Ref SSHSecurityGroup
       KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref ServerSecurityGroup
+            - !Ref SSHSecurityGroup
+          SubnetId:
+            Ref: SubnetA
       BlockDeviceMappings:
         - DeviceName: "/dev/sda1"
           Ebs:
