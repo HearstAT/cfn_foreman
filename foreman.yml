@@ -360,6 +360,27 @@ Resources:
               yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm || error_exit "Failed to install epel foreman"
               yum install -y foreman-installer || error_exit "Failed to install foreman-installer via yum"
               yum install -y https://packages.chef.io/stable/el/7/chef-12.16.42-1.el7.x86_64.rpm || error_exit "Failed to install chef"
+              yum install -y mod_passenger tfm-rubygem-passenger tfm-rubygem-passenger-native tfm-rubygem-passenger-native-libs rubygem-passenger rubygem-passenger-native rubygem-passenger-native-libs || error_exit "Failed to install Ruby SCL"
+
+              mkdir -d /etc/foreman
+
+              # Create Database
+              cat > '/etc/foreman/database.yml' <<EOF
+              ---
+              production:
+                adapter: postgresql
+                database: ${ForemanSubdomain}-db
+                username: ${DBUser}
+                password: ${DBPassword}
+                host: ${DBENDPOINT}
+              EOF
+
+              # Create Database
+              cat > '/etc/foreman/settings.yml' <<EOF
+              ---
+              :login: true
+              :unattended: true
+              EOF
 
               # Install Foreman w/ Selected options
               foreman-installer \
@@ -375,18 +396,6 @@ Resources:
                 --foreman-admin-email=${AdminEmail} \
                 # Disable Puppet
                 --foreman-server-ssl-crl="" \
-                # Enable External DB
-                --foreman-db-type=postgresql \
-                # Enable External DB
-                --foreman-db-manage=false \
-                # Enable External DB
-                --foreman-db-host=${DBENDPOINT} \
-                # Enable External DB
-                --foreman-db-database=${ForemanSubdomain}-db \
-                # Enable External DB
-                --foreman-db-username=${DBUser} \
-                # Enable External DB
-                --foreman-db-password=${DBPassword} \
                 # Disable Install by Puppet
                 --no-enable-foreman \
                 # Disable Install by Puppet
@@ -399,10 +408,6 @@ Resources:
                 --enable-foreman-proxy \
                 # Enable Smart Proxy
                 --foreman-proxy-tftp=false \
-                # Enable Smart Proxy
-                --foreman-proxy-foreman-base-url=https://${FOREMANURL} \
-                # Enable Smart Proxy
-                --foreman-proxy-trusted-hosts=${FOREMANURL} \
                 # Disable multi-foreman setups for now
                 --foreman-proxy-register-in-foreman=false \
                 # Enable Chef Plugin
@@ -422,8 +427,8 @@ Resources:
                 || error_exit "Foreman Install Failed"
 
               # Run foremand DB tasks
-              foreman-rake db:migrate || error_exit "db migrate failed for Foreman"
-              foreman-rake db:seed || error_exit "db seed failed for Foreman"
+              foreman-rake db:migrate RAILS_ENV=production || error_exit "db migrate failed for Foreman"
+              foreman-rake db:seed RAILS_ENV=production || error_exit "db seed failed for Foreman"
               foreman-rake apipie:cache:index || error_exit "apipie cache index failed for foreman"
 
               # All is well so signal success and let CF know wait function is complete
