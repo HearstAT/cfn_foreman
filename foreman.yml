@@ -330,17 +330,22 @@ Resources:
               #!/bin/bash -xev
               exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
-              yum -y upgrade
-              yum install -y wget curl python-setuptools python-pip git
+              yum -y upgrade || error_exit "Failed to upgrade"
+              yum install -y curl python-setuptools git || error_exit " Failed to install curl and setup tools"
 
               # Install cfn bootstraping tools
               if [ -z $(command -v cfn-signal) ]; then
-                  easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+                  easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz || error_exit "Failed to install cfn tools"
+              fi
+
+              # Check for and Install Pip
+              if [ -z $(command -v pip) ]; then
+                curl https://bootstrap.pypa.io/get-pip.py | python || error_exit "Failed to install Pip"
               fi
 
               # Install AWS Cli Tools
               if [ -z $(command -v aws) ]; then
-                pip install awscli
+                pip install awscli || error_exit "Failed to install aws cli"
               fi
 
               # Helper function to set wait timer
@@ -354,37 +359,66 @@ Resources:
               yum install -y centos-release-scl || error_exit "Failed to add scl release"
               yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm || error_exit "Failed to install epel foreman"
               yum install -y foreman-installer || error_exit "Failed to install foreman-installer via yum"
+              yum install -y https://packages.chef.io/stable/el/7/chef-12.16.42-1.el7.x86_64.rpm || error_exit "Failed to install chef"
 
               # Install Foreman w/ Selected options
               foreman-installer \
-                --no-enable-puppet \ # Disable Puppet
-                --foreman-authentication \ # Set foreman to authenticated users
-                --foreman-admin-username=${AdminUser} \ # Set Admin User
-                --foreman-admin-password=${AdminPassword} \ # Set Admin Password
-                --foreman-admin-email=${AdminEmail} \ # Set Admin Email
-                --foreman-server-ssl-crl="" \ # Disable Puppet
-                --foreman-db-type=postgresql \ # Enable External DB
-                --foreman-db-manage=false \ # Enable External DB
-                --foreman-db-host=${DBENDPOINT} \ # Enable External DB
-                --foreman-db-database=${ForemanSubdomain}-db \ # Enable External DB
-                --foreman-db-username=${DBUser} \ # Enable External DB
-                --foreman-db-password=${DBPassword} \ # Enable External DB
-                --no-enable-foreman \ # Disable Install by Puppet
-                --no-enable-foreman-cli \ # Disable Install by Puppet
-                --no-enable-foreman-plugin-bootdisk \ # Disable Install by Puppet
-                --no-enable-foreman-plugin-setup \ # Disable Install by Puppet
-                --enable-foreman-proxy \ # Enable Smart Proxy
-                --foreman-proxy-tftp=false \ # Enable Smart Proxy
-                --foreman-proxy-foreman-base-url=https://${FOREMANURL} \ # Enable Smart Proxy
-                --foreman-proxy-trusted-hosts=${FOREMANURL} \ # Enable Smart Proxy
-                --foreman-proxy-register-in-foreman=false \ # Disable multi-foreman setups for now
-                --enable-foreman-plugin-chef \ # Enable Chef Plugin
-                --enable-foreman-plugin-tasks \ # Enable Chef Plugin Dep
-                --enable-foreman-proxy-plugin-chef \ # Enable Chef Plugin for Smart Proxy
-                --foreman-proxy-plugin-chef-listen-on=both \ # Enable Chef Plugin listener for HTTP/HTTPS
-                --foreman-proxy-plugin-chef-server-url=c${ChefServerUrl} \ # Enable Chef Plugin
-                --foreman-proxy-plugin-chef-client-name="pivotal" \ # Enable Chef Plugin for Global View
-                --foreman-proxy-plugin-chef-private-key="/etc/opscode/pivotal.pem" \ # Enable Chef Plugin for Global View
+                # Disable Puppet
+                --no-enable-puppet \
+                # Set foreman to authenticated users
+                --foreman-authentication \
+                # Set Admin User
+                --foreman-admin-username=${AdminUser} \
+                # Set Admin Password
+                --foreman-admin-password=${AdminPassword} \
+                # Set Admin Email
+                --foreman-admin-email=${AdminEmail} \
+                # Disable Puppet
+                --foreman-server-ssl-crl="" \
+                # Enable External DB
+                --foreman-db-type=postgresql \
+                # Enable External DB
+                --foreman-db-manage=false \
+                # Enable External DB
+                --foreman-db-host=${DBENDPOINT} \
+                # Enable External DB
+                --foreman-db-database=${ForemanSubdomain}-db \
+                # Enable External DB
+                --foreman-db-username=${DBUser} \
+                # Enable External DB
+                --foreman-db-password=${DBPassword} \
+                # Disable Install by Puppet
+                --no-enable-foreman \
+                # Disable Install by Puppet
+                --no-enable-foreman-cli \
+                # Disable Install by Puppet
+                --no-enable-foreman-plugin-bootdisk \
+                # Disable Install by Puppet
+                --no-enable-foreman-plugin-setup \
+                # Enable Smart Proxy
+                --enable-foreman-proxy \
+                # Enable Smart Proxy
+                --foreman-proxy-tftp=false \
+                # Enable Smart Proxy
+                --foreman-proxy-foreman-base-url=https://${FOREMANURL} \
+                # Enable Smart Proxy
+                --foreman-proxy-trusted-hosts=${FOREMANURL} \
+                # Disable multi-foreman setups for now
+                --foreman-proxy-register-in-foreman=false \
+                # Enable Chef Plugin
+                --enable-foreman-plugin-chef \
+                # Enable Chef Plugin Dep
+                --enable-foreman-plugin-tasks \
+                # Enable Chef Plugin for Smart Proxy
+                --enable-foreman-proxy-plugin-chef \
+                # Enable Chef Plugin listener for HTTP/HTTPS
+                --foreman-proxy-plugin-chef-listen-on=both \
+                # Enable Chef Plugin
+                --foreman-proxy-plugin-chef-server-url=c${ChefServerUrl} \
+                # Enable Chef Plugin for Global View
+                --foreman-proxy-plugin-chef-client-name="pivotal" \
+                # Enable Chef Plugin for Global View
+                --foreman-proxy-plugin-chef-private-key="/etc/opscode/pivotal.pem" \
                 || error_exit "Foreman Install Failed"
 
               # Run foremand DB tasks
