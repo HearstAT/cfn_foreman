@@ -358,7 +358,6 @@ Resources:
               # Install foreman epel repo and foreman installer
               yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm || error_exit "Failed to install epel foreman"
               yum install -y foreman-installer || error_exit "Failed to install foreman-installer via yum"
-              yum install -y https://packages.chef.io/stable/el/7/chef-12.16.42-1.el7.x86_64.rpm || error_exit "Failed to install chef"
               mkdir -p /etc/foreman-installer/scenarios.d/ || error_exit "Could create foreman answers directory"
 
               # Create Database
@@ -411,6 +410,7 @@ Resources:
                   repo: stable
                   gpgcheck: true
                   custom_repo: true
+                  http: true
                   ssl: false
                   trusted_hosts:
                     - ${FOREMANURL}
@@ -420,6 +420,7 @@ Resources:
                   puppetca: false
                   manage_puppet_group: false
                   puppet: false
+                  foreman_base_url: "http://${FOREMANURL}"
                 puppet: false
                 "foreman::plugin::tasks":
                   package: tfm-rubygem-foreman-tasks
