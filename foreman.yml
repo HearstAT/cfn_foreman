@@ -356,80 +356,90 @@ Resources:
               }
 
               # Install foreman epel repo and foreman installer
-              yum install -y centos-release-scl || error_exit "Failed to add scl release"
               yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm || error_exit "Failed to install epel foreman"
               yum install -y foreman-installer || error_exit "Failed to install foreman-installer via yum"
               yum install -y https://packages.chef.io/stable/el/7/chef-12.16.42-1.el7.x86_64.rpm || error_exit "Failed to install chef"
-              yum install -y mod_passenger tfm-rubygem-passenger tfm-rubygem-passenger-native tfm-rubygem-passenger-native-libs rubygem-passenger rubygem-passenger-native rubygem-passenger-native-libs || error_exit "Failed to install Ruby SCL"
-
-              mkdir -d /etc/foreman
+              mkdir -p /etc/foreman-installer/scenarios.d/ || error_exit "Could create foreman answers directory"
 
               # Create Database
-              cat > '/etc/foreman/database.yml' <<EOF
+              cat > '/etc/foreman-installer/scenarios.d/foreman-answers.yaml' <<EOF
               ---
-              production:
-                adapter: postgresql
-                database: ${ForemanSubdomain}-db
-                username: ${DBUser}
-                password: ${DBPassword}
-                host: ${DBENDPOINT}
+                foreman:
+                  foreman_url: "http://${FOREMANURL}"
+                  puppetrun: false
+                  unattended: true
+                  authentication: true
+                  servername: ${FOREMANURL}
+                  serveraliases:
+                    - foreman
+                  ssl: false
+                  custom_repo: true
+                  repo: stable
+                  configure_epel_repo: true
+                  configure_scl_repo: true
+                  gpgcheck: true
+                  db_manage: false
+                  db_type: postgresql
+                  db_adapter: postgresql
+                  db_host: ${DBENDPOINT}
+                  db_database: ${ForemanSubdomain}-db
+                  db_username: ${DBUser}
+                  db_password: ${DBPassword}
+                  admin_username: ${AdminUser}
+                  admin_password: ${AdminPassword}
+                  admin_email: ${AdminEmail}
+                  websockets_encrypt: false
+                  logging_level: info
+                  loggers: {}
+                  email_conf: email.yaml
+                  email_source: email.yaml.erb
+                  email_delivery_method:
+                  email_smtp_address:
+                  email_smtp_port: 25
+                  email_smtp_domain:
+                  email_smtp_authentication: none
+                  email_smtp_user_name:
+                  email_smtp_password:
+                "foreman::cli":
+                  foreman_url:
+                  manage_root_config: true
+                  username:
+                  password:
+                  refresh_cache: false
+                  request_timeout: 120
+                foreman_proxy:
+                  repo: stable
+                  gpgcheck: true
+                  custom_repo: true
+                  ssl: false
+                  trusted_hosts:
+                    - ${FOREMANURL}
+                  ssl_disabled_ciphers: []
+                  manage_sudoersd: true
+                  use_sudoersd: true
+                  puppetca: false
+                  manage_puppet_group: false
+                  puppet: false
+                puppet: false
+                "foreman::plugin::tasks":
+                  package: tfm-rubygem-foreman-tasks
+                  service: foreman-tasks
+                "foreman::compute::ec2": false
+                "foreman_proxy::plugin::chef":
+                  enabled: true
+                  listen_on: https
+                  server_url: #{ChefServerUrl}
+                  client_name: pivotal
+                  private_key: /etc/opscode/pivotal.pem
+                  ssl_verify: true
               EOF
-
-              # Create Database
-              cat > '/etc/foreman/settings.yml' <<EOF
-              ---
-              :login: true
-              :unattended: true
-              EOF
-
-              # Install Foreman w/ Selected options
-              foreman-installer \
-                # Disable Puppet
-                --no-enable-puppet \
-                # Set foreman to authenticated users
-                --foreman-authentication \
-                # Set Admin User
-                --foreman-admin-username=${AdminUser} \
-                # Set Admin Password
-                --foreman-admin-password=${AdminPassword} \
-                # Set Admin Email
-                --foreman-admin-email=${AdminEmail} \
-                # Disable Puppet
-                --foreman-server-ssl-crl="" \
-                # Disable Install by Puppet
-                --no-enable-foreman \
-                # Disable Install by Puppet
-                --no-enable-foreman-cli \
-                # Disable Install by Puppet
-                --no-enable-foreman-plugin-bootdisk \
-                # Disable Install by Puppet
-                --no-enable-foreman-plugin-setup \
-                # Enable Smart Proxy
-                --enable-foreman-proxy \
-                # Enable Smart Proxy
-                --foreman-proxy-tftp=false \
-                # Disable multi-foreman setups for now
-                --foreman-proxy-register-in-foreman=false \
-                # Enable Chef Plugin
-                --enable-foreman-plugin-chef \
-                # Enable Chef Plugin Dep
-                --enable-foreman-plugin-tasks \
-                # Enable Chef Plugin for Smart Proxy
-                --enable-foreman-proxy-plugin-chef \
-                # Enable Chef Plugin listener for HTTP/HTTPS
-                --foreman-proxy-plugin-chef-listen-on=both \
-                # Enable Chef Plugin
-                --foreman-proxy-plugin-chef-server-url=c${ChefServerUrl} \
-                # Enable Chef Plugin for Global View
-                --foreman-proxy-plugin-chef-client-name="pivotal" \
-                # Enable Chef Plugin for Global View
-                --foreman-proxy-plugin-chef-private-key="/etc/opscode/pivotal.pem" \
-                || error_exit "Foreman Install Failed"
-
-              # Run foremand DB tasks
-              foreman-rake db:migrate RAILS_ENV=production || error_exit "db migrate failed for Foreman"
-              foreman-rake db:seed RAILS_ENV=production || error_exit "db seed failed for Foreman"
-              foreman-rake apipie:cache:index || error_exit "apipie cache index failed for foreman"
+              #
+              foreman-installer || error_exit "Foreman Install Failed"
+              #
+              # # Run foremand DB tasks
+              # foreman-rake db:migrate || error_exit "db migrate failed for Foreman"
+              # foreman-rake db:seed || error_exit "db seed failed for Foreman"
+              # foreman-rake apipie:cache:index || error_exit "apipie cache index failed for foreman"
 
               # All is well so signal success and let CF know wait function is complete
               /usr/local/bin/cfn-signal -e 0 -r 'Server setup complete' ${WaitHandle}
