@@ -369,7 +369,7 @@ Resources:
               # Helper function to set wait timer
               error_exit()
               {
-                cfn-signal -e 1 -r $1 "${WaitHandle}"
+                cfn-signal -e 1 -r "$1" "${WaitHandle}"
                 exit 1
               }
 
@@ -446,13 +446,13 @@ Resources:
 
               # Install Dev Gems of Chef Plugins (better support for 1.13)
               gem install bundle || error_exit "Failed to install gem Bundle"
-              cat > '~/.gemrc' <<EOF
-              gem: --no-rdoc --no-ri
-              EOF
+
               mkdir -p /opt/bundle
               cat > '/opt/bundle/Gemfile' <<EOF
+              source "https://rubygems.org"
+
               gem 'foreman_chef', :git => 'https://github.com/theforeman/foreman_chef.git'
-              gem 'smart_proxy_chef' :git => 'https://github.com/theforeman/smart_proxy_chef.git'
+              gem 'smart_proxy_chef', :git => 'https://github.com/theforeman/smart_proxy_chef.git'
               EOF
 
               cd /opt/bundle/ && bundle install || error_exit "Bundle Install Failed"
@@ -527,7 +527,6 @@ Resources:
                   refresh_cache: false
                   request_timeout: 120
                 foreman_proxy:
-                  repo: stable
                   bind_host: "*"
                   ssl_port: 8443
                   gpgcheck: true
@@ -551,7 +550,7 @@ Resources:
                   puppetca: false
                   manage_puppet_group: false
                   puppet: false
-                  foreman_base_url: "https://foreman.${HostedZone}""
+                  foreman_base_url: "https://foreman.${HostedZone}"
                   dns_server: "8.8.8.8"
                 puppet: false
                 "foreman::plugin::tasks":
