@@ -170,9 +170,9 @@ Metadata:
 Mappings:
   RegionMap:
     us-west-2:
-      HVM64: ami-d2c924b2
+      HVM64: ami-9ee24ffe
     eu-west-1:
-      HVM64: ami-7abd0209
+      HVM64: ami-07174474
 
 Resources:
   # Create the necessary subnets for Instance and DB
