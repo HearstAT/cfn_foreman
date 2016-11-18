@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: "The Foreman on CentOS 7"
+Description: "The Foreman on Ubuntu Xenial"
 Parameters:
   VPC:
     Description: Choose VPC to use
@@ -81,11 +81,11 @@ Parameters:
 
   ForemanSubdomain:
     Type: String
-    Default: Foreman-a
+    Default: foreman-a
     AllowedValues:
-      - Foreman-a
-      - Foreman-b
-      - Foreman-test
+      - foreman-a
+      - foreman-b
+      - foreman-test
     Description: subdomain/prefix for chose hosted zone used for staging
 
   DBUser:
@@ -358,8 +358,8 @@ Resources:
               #!/bin/bash -xev
               exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
-              yum -y upgrade || error_exit "Failed to upgrade"
-              yum install -y curl python-setuptools git
+              apt-get update && apt-get -y upgrade
+              apt-get install -y wget curl python-setuptools python-pip git ca-certificates ruby ruby-dev libvirt-dev libaugeas-dev puppet
 
               # Install cfn bootstraping tools
               if [ -z $(command -v cfn-signal) ]; then
@@ -383,8 +383,13 @@ Resources:
                 pip install awscli || error_exit "Failed to install aws cli"
               fi
 
+              # install chef
+              if [ ! -f "/usr/bin/chef-client" ]; then
+                  curl -L https://omnitruck.chef.io/install.sh | bash || error_exit 'could no install chef'
+              fi
+
               # Install S3FS Dependencies
-              yum install -y automake fuse fuse-devel gcc-c++ git libcurl-devel libxml2-devel make openssl-devel || error_exit "Failed to install S3FS Deps"
+              sudo apt-get install -y automake autotools-dev g++ git libcurl4-gnutls-dev libfuse-dev libssl-dev libxml2-dev make pkg-config || error_exit "Failed to install S3FS Deps"
 
               # Install S3FS
 
@@ -417,24 +422,40 @@ Resources:
               # Sleep to allow s3fs to connect
               sleep 20
 
-              HOSTNAME="${ForemanSubdomain}"
-              FQDN="${ForemanSubdomain}.${HostedZone}"
-
               # Set hostname
-              hostname $FQDN  || error_exit 'Failed to set hostname'
-              echo  $FQDN  > /etc/hostname || error_exit 'Failed to set hostname file'
+              hostname foreman.${HostedZone}  || error_exit 'Failed to set hostname'
+              echo  foreman.${HostedZone}  > /etc/hostname || error_exit 'Failed to set hostname file'
 
               cat > '/etc/hosts' << EOF
-              127.0.0.1 $FQDN $HOSTNAME localhost
+              127.0.0.1 foreman.${HostedZone} foreman ${ForemanSubdomain} foreman localhost
               ::1 localhost6.localdomain6 localhost6
               EOF
 
               cd / && tar -zxvf /opt/s3-bucket/core_bundle.tar.gz etc/opscode/pivotal.pem || error_exit "Failed to extract Pivotal.pem"
               chown -R root:root /etc/opscode/
 
+              mkdir -p /opt/certs && cp -r /opt/s3-bucket/certs/* /opt/certs/
+
               # Install foreman epel repo and foreman installer
-              yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm || error_exit "Failed to install epel foreman"
-              yum install -y foreman-installer || error_exit "Failed to install foreman-installer via yum"
+              echo "deb http://deb.theforeman.org/ xenial 1.13" > /etc/apt/sources.list.d/foreman.list || error_exit "Failed to add foreman repo"
+              echo "deb http://deb.theforeman.org/ plugins 1.13" >> /etc/apt/sources.list.d/foreman.list || error_exit "Failed to plugins repo"
+              wget -q https://deb.theforeman.org/pubkey.gpg -O- | apt-key add - || error_exit "failed to add gpg key for repos"
+              apt-get update && apt-get -y install foreman-installer || error_exit "Failed to install foreman-installed"
+
+              puppet cert generate foreman.${HostedZone}
+
+              # Install Dev Gems of Chef Plugins (better support for 1.13)
+              gem install bundle || error_exit "Failed to install gem Bundle"
+              cat > '~/.gemrc' <<EOF
+              gem: --no-rdoc --no-ri
+              EOF
+              mkdir -p /opt/bundle
+              cat > '/opt/bundle/Gemfile' <<EOF
+              gem 'foreman_chef', :git => 'https://github.com/theforeman/foreman_chef.git'
+              gem 'smart_proxy_chef' :git => 'https://github.com/theforeman/smart_proxy_chef.git'
+              EOF
+
+              cd /opt/bundle/ && bundle install || error_exit "Bundle Install Failed"
 
               # Create Answer File Directory
               mkdir -p /etc/foreman-installer/scenarios.d/ || error_exit "Could create foreman answers directory"
@@ -443,14 +464,15 @@ Resources:
               cat > '/etc/foreman-installer/scenarios.d/foreman-answers.yaml' <<EOF
               ---
                 foreman:
-                  foreman_url: "http://${FOREMANURL}"
+                  foreman_url: "https://foreman.${HostedZone}"
                   puppetrun: false
                   unattended: true
                   authentication: true
-                  servername: ${FOREMANURL}
+                  servername: foreman.${HostedZone}
                   serveraliases:
                     - foreman
-                  ssl: false
+                    - ${ForemanSubdomain}
+                  ssl: true
                   custom_repo: true
                   repo: stable
                   configure_epel_repo: true
@@ -464,10 +486,30 @@ Resources:
                   db_database: foreman_db
                   db_username: ${DBUser}
                   db_password: ${DBPassword}
+                  app_root: /usr/share/foreman
+                  manage_user: true
+                  user: foreman
+                  group: foreman
+                  user_groups:
+                    - puppet
+                  rails_env: production
+                  puppet_home: /var/lib/puppet
+                  puppet_ssldir: /var/lib/puppet/ssl
+                  server_ssl_port: 443
+                  server_ssl_chain: /opt/certs/foreman.${HostedZone}.chain.crt
+                  server_ssl_cert: /opt/certs/foreman.${HostedZone}.crt
+                  server_ssl_certs_dir: /opt/certs/
+                  server_ssl_key: /opt/certs/foreman.${HostedZone}.key
+                  server_ssl_crl: ""
+                  client_ssl_ca: /var/lib/puppet/ssl/certs/ca.pem
+                  client_ssl_cert: /var/lib/puppet/ssl/certs/foreman.${HostedZone}.pem
+                  client_ssl_key: /var/lib/puppet/ssl/private_keys/foreman.${HostedZone}.pem
                   admin_username: ${AdminUser}
                   admin_password: ${AdminPassword}
                   admin_email: ${AdminEmail}
-                  websockets_encrypt: false
+                  websockets_encrypt: true
+                  websockets_ssl_key: /var/lib/puppet/ssl/private_keys/foreman.${HostedZone}.pem
+                  websockets_ssl_cert: /var/lib/puppet/ssl/certs/foreman.${HostedZone}.pem
                   email_conf: email.yaml
                   email_source: email.yaml.erb
                   email_delivery_method:
@@ -486,24 +528,31 @@ Resources:
                   request_timeout: 120
                 foreman_proxy:
                   repo: stable
+                  bind_host: "*"
+                  ssl_port: 8443
                   gpgcheck: true
                   custom_repo: true
-                  http: true
-                  ssl: false
+                  http: false
+                  ssl: true
+                  ssl_ca: /var/lib/puppet/ssl/certs/ca.pem
+                  ssl_cert: /var/lib/puppet/ssl/certs/foreman.${HostedZone}.pem
+                  ssl_key: /var/lib/puppet/ssl/private_keys/foreman.${HostedZone}.pem
+                  foreman_ssl_ca: /var/lib/puppet/ssl/certs/ca.pem
+                  foreman_ssl_cert: /var/lib/puppet/ssl/certs/foreman.${HostedZone}.pem
+                  foreman_ssl_key: /var/lib/puppet/ssl/private_keys/foreman.${HostedZone}.pem
                   logs: true
                   logs_listen_on: http
                   tftp: true
                   tftp_listen_on: http
                   register_in_foreman: false
-                  trusted_hosts:
-                    - ${FOREMANURL}
                   ssl_disabled_ciphers: []
                   manage_sudoersd: true
                   use_sudoersd: true
                   puppetca: false
                   manage_puppet_group: false
                   puppet: false
-                  foreman_base_url: "http://${FOREMANURL}"
+                  foreman_base_url: "https://foreman.${HostedZone}""
+                  dns_server: "8.8.8.8"
                 puppet: false
                 "foreman::plugin::tasks":
                   package: tfm-rubygem-foreman-tasks
