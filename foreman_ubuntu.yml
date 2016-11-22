@@ -234,13 +234,12 @@ Resources:
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: '80'
-          ToPort: '80'
-          CidrIp: 0.0.0.0/0
-      SecurityGroupIngress:
-        - IpProtocol: tcp
           FromPort: '443'
           ToPort: '443'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '8443'
+          ToPort: '8443'
           CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
         - IpProtocol: tcp
@@ -432,9 +431,10 @@ Resources:
               EOF
 
               cd / && tar -zxvf /opt/s3-bucket/core_bundle.tar.gz etc/opscode/pivotal.pem || error_exit "Failed to extract Pivotal.pem"
-              chown -R root:root /etc/opscode/
+              chown -R root:root /etc/opscode/ && chmod -R 766 /etc/opscode
 
-              mkdir -p /opt/certs && cp -r /opt/s3-bucket/certs/* /opt/certs/
+              mkdir -p /opt/certs && cp -r /opt/s3-bucket/certs/foreman/* /opt/certs/
+              chmod -R 766 /opt/certs/
 
               # Install foreman epel repo and foreman installer
               echo "deb http://deb.theforeman.org/ xenial 1.13" > /etc/apt/sources.list.d/foreman.list || error_exit "Failed to add foreman repo"
@@ -475,8 +475,6 @@ Resources:
                   ssl: true
                   custom_repo: true
                   repo: stable
-                  configure_epel_repo: true
-                  configure_scl_repo: true
                   gpgcheck: true
                   db_manage: false
                   db_type: postgresql
@@ -553,9 +551,7 @@ Resources:
                   foreman_base_url: "https://foreman.${HostedZone}"
                   dns_server: "8.8.8.8"
                 puppet: false
-                "foreman::plugin::tasks":
-                  package: tfm-rubygem-foreman-tasks
-                  service: foreman-tasks
+                "foreman::plugin::tasks": true
                 "foreman::compute::ec2": true
                 "foreman::plugin::chef": true
                 "foreman_proxy::plugin::chef":
@@ -575,7 +571,7 @@ Resources:
               fi
               foreman-rake apipie:cache:index || error_exit "apipie cache index failed for foreman"
 
-              service httpd restart || error_exit "Failed to restart foreman post DB Setup"
+              service apache2 restart || error_exit "Failed to restart foreman post DB Setup"
 
               # All is well so signal success and let CF know wait function is complete
               cfn-signal -e 0 -r 'Server setup complete' "${WaitHandle}"
