@@ -597,15 +597,15 @@ Resources:
               # Create Local Certs
               ##########################################################
 
-              if [ ! -d /opt/certs ]; then
-                mkdir -p /opt/certs
+              if [ ! -d /opt/ssl ]; then
+                mkdir -p /opt/ssl
               fi
 
               cat > '/etc/puppet/puppet.conf' << EOF
               [main]
               logdir=/var/log/puppet
               vardir=/var/lib/puppet
-              ssldir=/opt/certs
+              ssldir=/opt/ssl
               rundir=/run/puppet
               factpath=$vardir/lib/facter
               prerun_command=/etc/puppet/etckeeper-commit-pre
@@ -618,15 +618,15 @@ Resources:
               ssl_client_verify_header = SSL_CLIENT_VERIFY
               EOF
 
-              if [ ! -f "/opt/certs/${ForemanSubdomain}.${HostedZone}.pem" ]; then
+              if [ ! -f "/opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem" ]; then
                 puppet cert generate ${ForemanSubdomain}.${HostedZone} || error_exit "Failed to generate cert for Foreman"
               fi
 
-              if [ ! -f "/opt/certs/${ForemanSubdomain}-proxy.${HostedZone}.pem" ]; then
+              if [ ! -f "/opt/ssl/certs/${ForemanSubdomain}-proxy.${HostedZone}.pem" ]; then
                 puppet cert generate ${ForemanSubdomain}-proxy.${HostedZone} || error_exit "Failed to generate cert for Foreman Proxy"
               fi
               ## Future Config
-              # aws s3 sync /opt/certs s3://${!FOREMANBUCKET}/certs || error_exit "Failed to sync bootstrap foreman directory"
+              # aws s3 sync /opt/ssl s3://${!FOREMANBUCKET}/ssl || error_exit "Failed to sync bootstrap foreman directory"
 
               ##########################################################
               # Foreman Answer File
@@ -670,22 +670,22 @@ Resources:
                     - puppet
                   rails_env: production
                   puppet_home: /var/lib/puppet
-                  puppet_ssldir: /opt/certs/
+                  puppet_ssldir: /opt/ssl/certs/
                   server_ssl_port: 443
-                  server_ssl_chain: /opt/certs/ca.pem
-                  server_ssl_cert: /opt/certs/${ForemanSubdomain}.${HostedZone}.pem
-                  server_ssl_certs_dir: /opt/certs/
-                  server_ssl_key: /opt/certs/private_keys/${ForemanSubdomain}.${HostedZone}.pem
+                  server_ssl_chain: /opt/ssl/certs/ca.pem
+                  server_ssl_cert: /opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem
+                  server_ssl_certs_dir: /opt/ssl/certs/
+                  server_ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}.${HostedZone}.pem
                   server_ssl_crl: ""
-                  client_ssl_ca: /opt/certs/ca.pem
-                  client_ssl_cert: /opt/certs/${ForemanSubdomain}.${HostedZone}.pem
-                  client_ssl_key: /opt/certs/private_keys/${ForemanSubdomain}.${HostedZone}.pem
+                  client_ssl_ca: /opt/ssl/certs/ca.pem
+                  client_ssl_cert: /opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem
+                  client_ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}.${HostedZone}.pem
                   admin_username: ${AdminUser}
                   admin_password: ${AdminPassword}
                   admin_email: ${AdminEmail}
                   websockets_encrypt: true
-                  websockets_ssl_key: /opt/certs/private_keys/${ForemanSubdomain}.${HostedZone}.pem
-                  websockets_ssl_cert: /opt/certs/${ForemanSubdomain}.${HostedZone}.pem
+                  websockets_ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}.${HostedZone}.pem
+                  websockets_ssl_cert: /opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem
                   email_conf: email.yaml
                   email_source: email.yaml.erb
                   email_delivery_method:
@@ -709,12 +709,12 @@ Resources:
                   custom_repo: true
                   http: false
                   ssl: true
-                  ssl_ca: /opt/certs/ca.pem
-                  ssl_cert: /opt/certs/${ForemanSubdomain}-proxy.${HostedZone}.pem
-                  ssl_key: /opt/certs/private_keys/${ForemanSubdomain}-proxy.${HostedZone}.pem
-                  foreman_ssl_ca: /opt/certs/ca.pem
-                  foreman_ssl_cert: /opt/certs/${ForemanSubdomain}.${HostedZone}.pem
-                  foreman_ssl_key: /opt/certs/private_keys/${ForemanSubdomain}.${HostedZone}.pem
+                  ssl_ca: /opt/ssl/certs/ca.pem
+                  ssl_cert: /opt/ssl/certs/${ForemanSubdomain}-proxy.${HostedZone}.pem
+                  ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}-proxy.${HostedZone}.pem
+                  foreman_ssl_ca: /opt/ssl/certs/ca.pem
+                  foreman_ssl_cert: /opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem
+                  foreman_ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}.${HostedZone}.pem
                   trusted_hosts:
                     - foreman.${HostedZone}
                     - ${ForemanSubdomain}.${HostedZone}
