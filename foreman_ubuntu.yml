@@ -220,7 +220,7 @@ Resources:
           - !Ref SubnetA
           - !Ref SubnetB
       Tags:
-        # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+
         - Key: Name
           Value: !Sub "${ForemanSubdomain} DB Subnet Group"
 
@@ -305,7 +305,6 @@ Resources:
               - "sts:AssumeRole"
       Path: "/"
 
-  # Just a placeholder role, please don't use this for real!
   RolePolicies:
     Type: AWS::IAM::Policy
     Properties:
@@ -339,7 +338,6 @@ Resources:
   ForemanDB:
     Type: AWS::RDS::DBInstance
     Properties:
-      # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
       DBInstanceIdentifier: !Sub ${ForemanSubdomain}-db
       DBName: "foreman_db"
       AllocatedStorage: 50
@@ -367,7 +365,6 @@ Resources:
   ForemanDNS:
     Type: AWS::Route53::RecordSetGroup
     Properties:
-      # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
       HostedZoneName: !Sub "${HostedZone}."
       Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} ELB.
       RecordSets:
@@ -416,7 +413,6 @@ Resources:
   ProxyDNS:
     Type: AWS::Route53::RecordSetGroup
     Properties:
-      # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
       HostedZoneName: !Sub "${HostedZone}."
       Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} ELB.
       RecordSets:
@@ -510,7 +506,6 @@ Resources:
             DeleteOnTermination: true
       IamInstanceProfile: !Ref InstanceProfile
       UserData:
-        # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
         "Fn::Base64":
           "Fn::Sub":
             - |
@@ -593,14 +588,35 @@ Resources:
               # Install Foreman Repo
               ##########################################################
 
-              echo "deb http://deb.the${ForemanSubdomain}.org/ xenial 1.14" > /etc/apt/sources.list.d/${ForemanSubdomain}.list || error_exit "Failed to add foreman repo"
-              echo "deb http://deb.the${ForemanSubdomain}.org/ plugins 1.14" >> /etc/apt/sources.list.d/${ForemanSubdomain}.list || error_exit "Failed to plugins repo"
-              wget -q https://deb.the${ForemanSubdomain}.org/pubkey.gpg -O- | apt-key add - || error_exit "failed to add gpg key for repos"
+              echo "deb http://deb.theforeman.org/ xenial 1.14" > /etc/apt/sources.list.d/theforeman.list || error_exit "Failed to add foreman repo"
+              echo "deb http://deb.theforeman.org/ plugins 1.14" >> /etc/apt/sources.list.d/theforeman.list || error_exit "Failed to plugins repo"
+              wget -q https://deb.theforeman.org/pubkey.gpg -O- | apt-key add - || error_exit "failed to add gpg key for repos"
               apt-get update && apt-get -y install foreman-installer || error_exit "Failed to install foreman-installed"
 
               ##########################################################
               # Create Local Certs
               ##########################################################
+
+              if [ ! -d /opt/certs ]; then
+                mkdir -p /opt/certs
+              fi
+
+              cat > '/etc/puppet/puppet.conf' << EOF
+              [main]
+              logdir=/var/log/puppet
+              vardir=/var/lib/puppet
+              ssldir=/opt/certs
+              rundir=/run/puppet
+              factpath=$vardir/lib/facter
+              prerun_command=/etc/puppet/etckeeper-commit-pre
+              postrun_command=/etc/puppet/etckeeper-commit-post
+
+              [master]
+              # These are needed when the puppetmaster is run by passenger
+              # and can safely be removed if webrick is used.
+              ssl_client_header = SSL_CLIENT_S_DN
+              ssl_client_verify_header = SSL_CLIENT_VERIFY
+              EOF
 
               if [ ! -f "/opt/certs/${ForemanSubdomain}.${HostedZone}.pem" ]; then
                 puppet cert generate ${ForemanSubdomain}.${HostedZone} || error_exit "Failed to generate cert for Foreman"
@@ -661,7 +677,7 @@ Resources:
                   server_ssl_certs_dir: /opt/certs/
                   server_ssl_key: /opt/certs/private_keys/${ForemanSubdomain}.${HostedZone}.pem
                   server_ssl_crl: ""
-                  client_ssl_ca: /opt/certs//ca.pem
+                  client_ssl_ca: /opt/certs/ca.pem
                   client_ssl_cert: /opt/certs/${ForemanSubdomain}.${HostedZone}.pem
                   client_ssl_key: /opt/certs/private_keys/${ForemanSubdomain}.${HostedZone}.pem
                   admin_username: ${AdminUser}
