@@ -368,7 +368,7 @@ Resources:
       HostedZoneName: !Sub "${HostedZone}."
       Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} ELB.
       RecordSets:
-        - Name: !Join [ '', [ !Ref ForemanSubdomain, ".", !Ref HostedZone, "." ] ]
+        - Name: !Sub "${ForemanSubdomain}.${HostedZone}"
           Type: A
           AliasTarget:
             HostedZoneId: !GetAtt ForemanALB.CanonicalHostedZoneID
@@ -399,6 +399,36 @@ Resources:
             - Type: forward
               TargetGroupArn: !Ref ForemanTargetGroup
 
+  ProxyListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: ProxyTargetGroup
+      Conditions:
+      - Field: host-header
+        Values:
+        - !Sub "${ForemanSubdomain}-proxy.${HostedZone}"
+      ListenerArn:
+        Ref: ForemanALBListener
+      Priority: 1
+
+  ForemanListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: ForemanTargetGroup
+      Conditions:
+      - Field: host-header
+        Values:
+        - !Sub "foreman-proxy.${HostedZone}"
+      ListenerArn:
+        Ref: ForemanALBListener
+      Priority: 2
+
   ForemanTargetGroup:
       Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
       Properties:
@@ -416,36 +446,11 @@ Resources:
       HostedZoneName: !Sub "${HostedZone}."
       Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} ELB.
       RecordSets:
-        - Name: !Join [ '', [ !Ref ForemanSubdomain, "-proxy.", !Ref HostedZone, "." ] ]
+        - Name: !Sub "${ForemanSubdomain}-proxy.${HostedZone}"
           Type: A
           AliasTarget:
-            HostedZoneId: !GetAtt ProxyALB.CanonicalHostedZoneID
-            DNSName: !GetAtt ProxyALB.DNSName
-
-  ProxyALB:
-    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
-    Properties:
-      Name: !Sub ${ForemanSubdomain}-Proxy-LB
-      SecurityGroups:
-        - Ref: ALBSecurityGroup
-      Subnets:
-        - Ref: SubnetA
-        - Ref: SubnetB
-      Tags:
-        - Key: Name
-          Value: !Sub "${ForemanSubdomain}-Proxy-LB"
-
-  ProxyALBListener:
-    Type: "AWS::ElasticLoadBalancingV2::Listener"
-    Properties:
-        Certificates:
-          - CertificateArn: !Ref SSLCertificateARN
-        LoadBalancerArn: !Ref ProxyALB
-        Port: 443
-        Protocol: HTTPS
-        DefaultActions:
-            - Type: forward
-              TargetGroupArn: !Ref ProxyTargetGroup
+            HostedZoneId: !GetAtt ForemanALB.CanonicalHostedZoneID
+            DNSName: !GetAtt ForemanALB.DNSName
 
   ProxyTargetGroup:
       Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
@@ -738,6 +743,7 @@ Resources:
                   package: ruby-foreman-tasks
                   service: ruby-foreman-tasks
                 "foreman::compute::ec2": true
+                "foreman::plugin::docker": true
                 "foreman::plugin::chef": true
                 "foreman_proxy::plugin::chef":
                   enabled: true
