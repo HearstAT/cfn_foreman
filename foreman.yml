@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: "The Foreman on CentOS 7"
+Description: "The Foreman on Ubuntu Xenial"
 Parameters:
   VPC:
     Description: Choose VPC to use
@@ -54,15 +54,10 @@ Parameters:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
     Type: AWS::EC2::KeyPair::KeyName
 
-  BucketName:
+  ChefBucketName:
     Type: String
     Default: ''
     Description: Enter name of Chef Bucket
-
-  BucketRegion:
-    Type: String
-    Default: ''
-    Description: Enter Region of Chef Bucket (e.g.; eu-west-1)
 
   SSHSecurityGroup:
     Description: Select Security Group for SSH Access
@@ -125,6 +120,11 @@ Parameters:
     Default: domain.com
     Description: must match a route53 hosted domain/zone
 
+  SSLCertificateARN:
+    Type: String
+    Default: ''
+    Description: SSL Certficate ARN for SSL Certficate
+
   ChefServerUrl:
     Type: String
     Default: chef.domain.com
@@ -141,6 +141,7 @@ Metadata:
         - KeyName
         - VPC
         - HostedZone
+        - SSLCertificateARN
         - SSHSecurityGroup
         - CIDRA
         - CIDRB
@@ -163,18 +164,22 @@ Metadata:
       Label:
         default: Chef Configuration
       Parameters:
-        - BucketName
-        - BucketRegion
+        - ChefBucketName
         - ChefServerUrl
 
 Mappings:
   RegionMap:
     us-west-2:
-      HVM64: ami-d2c924b2
+      HVM64: ami-efd0428f
     eu-west-1:
-      HVM64: ami-7abd0209
+      HVM64: ami-a8d2d7ce
 
 Resources:
+
+###############################################################################
+# Subnets
+###############################################################################
+
   # Create the necessary subnets for Instance and DB
   SubnetA:
     Type: AWS::EC2::Subnet
@@ -215,7 +220,7 @@ Resources:
           - !Ref SubnetA
           - !Ref SubnetB
       Tags:
-        # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
+
         - Key: Name
           Value: !Sub "${ForemanSubdomain} DB Subnet Group"
 
@@ -227,19 +232,54 @@ Resources:
         - EC2SecurityGroupId: !Ref ServerSecurityGroup
       GroupDescription: "Frontend Access"
 
+###############################################################################
+# Security: IAM, Groups, Instance Profiles
+###############################################################################
+
   ServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Setup Ingress/Egress for Servers
+      GroupDescription: Setup Ingress/Egress for Chef Frontend
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '9090'
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '9090'
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          SourceSecurityGroupId: !Ref SSHSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: '0'
+          ToPort: '65535'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${ForemanSubdomain}-Frontend-Security-Group
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Setup Ingress/Egress for Foreman Load Balancer
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: '443'
           ToPort: '443'
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: '8443'
-          ToPort: '8443'
           CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
         - IpProtocol: tcp
@@ -248,7 +288,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: Server-Security-Group
+          Value: !Sub ${ForemanSubdomain}-ALB-SecurityGroup
 
   InstanceRole:
     Type: AWS::IAM::Role
@@ -265,7 +305,6 @@ Resources:
               - "sts:AssumeRole"
       Path: "/"
 
-  # Just a placeholder role, please don't use this for real!
   RolePolicies:
     Type: AWS::IAM::Policy
     Properties:
@@ -276,7 +315,7 @@ Resources:
           -
             Effect: "Allow"
             Action: "s3:*"
-            Resource: !Join [ "", [ "arn:aws:s3:::", !Ref BucketName, "/*" ] ]
+            Resource: !Join [ "", [ "arn:aws:s3:::", !Ref ChefBucketName, "/*" ] ]
           -
             Effect: "Allow"
             Action: "s3:List*"
@@ -292,23 +331,13 @@ Resources:
         -
           !Ref InstanceRole
 
-  ForemanDNS:
-    Type: AWS::Route53::RecordSet
-    Properties:
-      # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
-      HostedZoneName: !Sub "${HostedZone}."
-      Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} Server.
-          # Create DNS A Record by joining ForemanSubdomain + HostedZone
-      Name: !Join [ '', [ !Ref ForemanSubdomain, ".", !Ref HostedZone, "." ] ]
-      Type: A
-      TTL: "900"
-      ResourceRecords:
-        - !GetAtt Ec2Instance.PublicIp
+###############################################################################
+# PostgreSQL DB
+###############################################################################
 
   ForemanDB:
     Type: AWS::RDS::DBInstance
     Properties:
-      # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
       DBInstanceIdentifier: !Sub ${ForemanSubdomain}-db
       DBName: "foreman_db"
       AllocatedStorage: 50
@@ -325,154 +354,308 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       MonitoringInterval: 5
       Tags:
-        # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
         - Key: Name
           Value: !Sub "${ForemanSubdomain} Database"
     DeletionPolicy: "Snapshot"
 
-  Ec2Instance:
-    Type: AWS::EC2::Instance
+###############################################################################
+# LoadBalancer and DNS
+###############################################################################
+
+  ForemanDNS:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: !Sub "${HostedZone}."
+      Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} ELB.
+      RecordSets:
+        - Name: !Sub "${ForemanSubdomain}.${HostedZone}"
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ForemanALB.CanonicalHostedZoneID
+            DNSName: !GetAtt ForemanALB.DNSName
+
+  ForemanALB:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: !Sub ${ForemanSubdomain}-LB
+      SecurityGroups:
+        - Ref: ALBSecurityGroup
+      Subnets:
+        - Ref: SubnetA
+        - Ref: SubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub "${ForemanSubdomain}-LB"
+
+  ForemanALBListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+        Certificates:
+          - CertificateArn: !Ref SSLCertificateARN
+        LoadBalancerArn: !Ref ForemanALB
+        Port: 443
+        Protocol: HTTPS
+        DefaultActions:
+            - Type: forward
+              TargetGroupArn: !Ref ForemanTargetGroup
+
+  ProxyListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: ProxyTargetGroup
+      Conditions:
+      - Field: host-header
+        Values:
+        - !Sub "${ForemanSubdomain}-proxy.${HostedZone}"
+      ListenerArn:
+        Ref: ForemanALBListener
+      Priority: 1
+
+  ForemanListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: ForemanTargetGroup
+      Conditions:
+      - Field: host-header
+        Values:
+        - !Sub "foreman-proxy.${HostedZone}"
+      ListenerArn:
+        Ref: ForemanALBListener
+      Priority: 2
+
+  ForemanTargetGroup:
+      Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+      Properties:
+          Name: !Sub "${ForemanSubdomain}-TargetGroup"
+          HealthCheckIntervalSeconds: 60
+          UnhealthyThresholdCount: 10
+          HealthCheckPath: /users/login
+          VpcId: !Ref VPC
+          Port: 80
+          Protocol: HTTP
+
+  ProxyDNS:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: !Sub "${HostedZone}."
+      Comment: !Sub Zone apex alias targeted to ${ForemanSubdomain} ELB.
+      RecordSets:
+        - Name: !Sub "${ForemanSubdomain}-proxy.${HostedZone}"
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ForemanALB.CanonicalHostedZoneID
+            DNSName: !GetAtt ForemanALB.DNSName
+
+  ProxyTargetGroup:
+      Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+      Properties:
+          Name: !Sub "${ForemanSubdomain}-Proxy-TargetGroup"
+          HealthCheckIntervalSeconds: 60
+          UnhealthyThresholdCount: 10
+          HealthCheckPath: /features
+          VpcId: !Ref VPC
+          Port: 8443
+          Protocol: HTTPS
+
+###############################################################################
+# Autoscaling
+###############################################################################
+
+  BootstrapAutoScaleGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+      - ForemanDB
+    Properties:
+      AvailabilityZones:
+        - !Select [ 0, !GetAZs "" ]
+        - !Select [ 1, !GetAZs "" ]
+      VPCZoneIdentifier:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      LaunchConfigurationName: !Ref ServerLaunchConfig
+      TargetGroupARNs:
+        - !Ref ForemanTargetGroup
+        - !Ref ProxyTargetGroup
+      MaxSize: '1'
+      MinSize: '1'
+      Tags:
+      - Key: Name
+        Value: !Sub ${ForemanSubdomain}-${AWS::StackName}
+        PropagateAtLaunch: true
+
+###############################################################################
+# Instance Launch Configuration
+###############################################################################
+
+  ServerLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       ImageId: !FindInMap [ RegionMap, !Ref "AWS::Region", HVM64 ]
       InstanceType: !Ref InstanceType
       KeyName: !Ref KeyName
-      NetworkInterfaces:
-        - AssociatePublicIpAddress: "true"
-          DeviceIndex: "0"
-          GroupSet:
-            - !Ref ServerSecurityGroup
-            - !Ref SSHSecurityGroup
-          SubnetId:
-            Ref: SubnetA
+      AssociatePublicIpAddress: true
+      SecurityGroups:
+        - !Ref ServerSecurityGroup
+        - !Ref SSHSecurityGroup
       BlockDeviceMappings:
-        - DeviceName: "/dev/sda1"
+        - DeviceName: /dev/sda1
           Ebs:
-            VolumeSize: '15'
+            VolumeSize: 20
+            VolumeType: gp2
+            DeleteOnTermination: true
       IamInstanceProfile: !Ref InstanceProfile
       UserData:
-        # Use sub to treat params and resources like variables http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-sub.html
         "Fn::Base64":
           "Fn::Sub":
             - |
               #!/bin/bash -xev
-              exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
-              yum -y upgrade || error_exit "Failed to upgrade"
-              yum install -y curl python-setuptools git
+              ##########################################################
+              # Global Variable Set
+              ##########################################################
 
-              # Install cfn bootstraping tools
+              export DEBIAN_FRONTEND=noninteractive
+              export INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+              export STACKNAME='${AWS::StackName}'
+              export HOSTNAME="${ForemanSubdomain}.${HostedZone}"
+
+              ##########################################################
+              # Upgrade OS & Install Dependencies
+              ##########################################################
+
+              apt-get update && apt-get -y upgrade
+              apt-get install -y wget curl python-setuptools python-pip git ca-certificates ruby ruby-dev libvirt-dev libaugeas-dev puppet
+
+              ##########################################################
+              # Install AWS & CFN Tools
+              ##########################################################
+
               if [ -z $(command -v cfn-signal) ]; then
                   easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
               fi
 
+              if [ -z $(command -v aws) ]; then
+                sleep 5
+                pip install awscli
+              fi
+
+              ##########################################################
+              # Install cfn bootstraping tools
+              ##########################################################
+
+              if [ -z $(command -v cfn-signal) ]; then
+                  easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+              fi
+
+              ##########################################################
               # Helper function to set wait timer
+              ##########################################################
+
               error_exit()
               {
                 cfn-signal -e 1 -r "$1" "${WaitHandle}"
                 exit 1
               }
 
-              # Check for and Install Pip
-              if [ -z $(command -v pip) ]; then
-                curl https://bootstrap.pypa.io/get-pip.py | python || error_exit "Failed to install Pip"
+              export -f error_exit
+
+              ##########################################################
+              # Get Chef Data
+              ##########################################################
+
+              if [ ! -d "/etc/opscode" ]; then
+                mkdir /etc/opscode
               fi
 
-              # Install AWS Cli Tools
-              if [ -z $(command -v aws) ]; then
-                pip install awscli || error_exit "Failed to install aws cli"
-              fi
+              aws s3 cp s3://${ChefBucketName}/etc_opscode/pivotal.pem /etc/opscode || error_exit "Failed to sync existing Pivotal Key"
 
-              # install chef
-              if [ ! -f "/usr/bin/chef-client" ]; then
-                  curl -L https://omnitruck.chef.io/install.sh | bash || error_exit 'could no install chef'
-              fi
+              chown -R root:root /etc/opscode/ && chmod -R 766 /etc/opscode
 
-              # Install S3FS Dependencies
-              yum install -y automake fuse fuse-devel gcc-c++ git libcurl-devel libxml2-devel make openssl-devel || error_exit "Failed to install S3FS Deps"
+              ##########################################################
+              # Set Hostname and Hosts File
+              ##########################################################
 
-              # Install S3FS
-
-              # If directory exists, remove it
-              if [ -d "/tmp/s3fs-fuse" ]; then
-                rm -rf /tmp/s3fs-fuse || error_exit "Failed to remove existing S3FS Directory"
-              fi
-
-              # If s3fs command doesn't exist, install
-              if [ ! -f "/usr/local/bin/s3fs" ]; then
-                cd /tmp
-                git clone https://github.com/s3fs-fuse/s3fs-fuse.git || error_exit 'Failed to clone s3fs-fuse'
-                cd s3fs-fuse
-                ./autogen.sh || error_exit 'Failed to run autogen for s3fs-fuse'
-                ./configure || error_exit 'Failed to run configure for s3fs-fuse'
-                make || error_exit 'Failed to make s3fs-fuse'
-                make install || error_exit 'Failed run make-install s3fs-fuse'
-              fi
-
-              # Create S3FS Mount Directory
-              if [ ! -d "/opt/s3-bucket" ]; then
-                mkdir /opt/s3-bucket
-              fi
-
-              # Mount S3 Bucket to Directory
-              /usr/local/bin/s3fs -o allow_other -o umask=000 -o iam_role=${InstanceRole} -o endpoint=${BucketRegion} ${BucketName} /opt/s3-bucket || error_exit 'Failed to mount s3fs'
-
-              echo -e "${BucketName} /opt/s3-bucket fuse.s3fs rw,_netdev,allow_other,umask=000,iam_role=${InstanceRole},endpoint=${BucketRegion},retries=5,multireq_max=5 0 0" >> /etc/fstab || error_exit 'Failed to add mount info to fstab'
-
-              # Sleep to allow s3fs to connect
-              sleep 20
-
-              # Set hostname
-              hostname foreman.${HostedZone}  || error_exit 'Failed to set hostname'
-              echo  foreman.${HostedZone}  > /etc/hostname || error_exit 'Failed to set hostname file'
+              hostname ${ForemanSubdomain}.${HostedZone}  || error_exit 'Failed to set hostname'
+              echo  ${ForemanSubdomain}.${HostedZone}  > /etc/hostname || error_exit 'Failed to set hostname file'
 
               cat > '/etc/hosts' << EOF
-              127.0.0.1 foreman.${HostedZone} foreman ${ForemanSubdomain} foreman localhost
+              127.0.0.1 ${ForemanSubdomain}-proxy.${HostedZone} ${ForemanSubdomain}-proxy localhost
               ::1 localhost6.localdomain6 localhost6
               EOF
 
-              cd / && tar -zxvf /opt/s3-bucket/core_bundle.tar.gz etc/opscode/pivotal.pem || error_exit "Failed to extract Pivotal.pem"
-              chown -R root:root /etc/opscode/ && chmod -R 766 /etc/opscode
+              ##########################################################
+              # Install Foreman Repo
+              ##########################################################
 
-              mkdir -p /opt/certs && cp -r /opt/s3-bucket/certs/foreman/* /opt/certs/
-              chmod -R 766 /opt/certs/
+              echo "deb http://deb.theforeman.org/ xenial 1.15" > /etc/apt/sources.list.d/theforeman.list || error_exit "Failed to add foreman repo"
+              echo "deb http://deb.theforeman.org/ plugins 1.15" >> /etc/apt/sources.list.d/theforeman.list || error_exit "Failed to plugins repo"
+              wget -q https://deb.theforeman.org/pubkey.gpg -O- | apt-key add - || error_exit "failed to add gpg key for repos"
+              apt-get update && apt-get -y install foreman-installer || error_exit "Failed to install foreman-installed"
 
-              # Install foreman epel repo and foreman installer
-              yum install -y epel-release https://yum.theforeman.org/releases/1.13/el7/x86_64/foreman-release.rpm || error_exit "Failed to install epel foreman"
-              yum install -y foreman-installer || error_exit "Failed to install foreman-installer via yum"
+              ##########################################################
+              # Create Local Certs
+              ##########################################################
 
-              puppet cert generate foreman.${HostedZone}
+              if [ ! -d /opt/ssl ]; then
+                mkdir -p /opt/ssl
+              fi
 
-              # Install Dev Gems of Chef Plugins (better support for 1.13)
-              gem install bundle || error_exit "Failed to install gem Bundle"
+              cat > '/etc/puppet/puppet.conf' << EOF
+              [main]
+              logdir=/var/log/puppet
+              vardir=/var/lib/puppet
+              ssldir=/opt/ssl
+              rundir=/run/puppet
+              factpath=$vardir/lib/facter
+              prerun_command=/etc/puppet/etckeeper-commit-pre
+              postrun_command=/etc/puppet/etckeeper-commit-post
 
-              mkdir -p /opt/bundle
-              cat > '/opt/bundle/Gemfile' <<EOF
-              source "https://rubygems.org"
-
-              gem 'foreman_chef', :git => 'https://github.com/theforeman/foreman_chef.git'
-              gem 'smart_proxy_chef', :git => 'https://github.com/theforeman/smart_proxy_chef.git'
+              [master]
+              # These are needed when the puppetmaster is run by passenger
+              # and can safely be removed if webrick is used.
+              ssl_client_header = SSL_CLIENT_S_DN
+              ssl_client_verify_header = SSL_CLIENT_VERIFY
               EOF
 
-              cd /opt/bundle/ && bundle install || error_exit "Bundle Install Failed"
+              if [ ! -f "/opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem" ]; then
+                puppet cert generate ${ForemanSubdomain}.${HostedZone} || error_exit "Failed to generate cert for Foreman"
+              fi
 
-              # Create Answer File Directory
+              if [ ! -f "/opt/ssl/certs/${ForemanSubdomain}-proxy.${HostedZone}.pem" ]; then
+                puppet cert generate ${ForemanSubdomain}-proxy.${HostedZone} || error_exit "Failed to generate cert for Foreman Proxy"
+              fi
+              ## Future Config
+              # aws s3 sync /opt/ssl s3://${!FOREMANBUCKET}/ssl || error_exit "Failed to sync bootstrap foreman directory"
+
+              ##########################################################
+              # Foreman Answer File
+              ##########################################################
+
               mkdir -p /etc/foreman-installer/scenarios.d/ || error_exit "Could create foreman answers directory"
 
-              # Create Foreman Answer File
               cat > '/etc/foreman-installer/scenarios.d/foreman-answers.yaml' <<EOF
               ---
                 foreman:
-                  foreman_url: "https://foreman.${HostedZone}"
+                  foreman_url: "https://${ForemanSubdomain}.${HostedZone}"
+                  locations_enabled: true
+                  organizations_enabled: true
                   puppetrun: false
                   unattended: true
                   authentication: true
-                  configure_epel_repo: true
-                  configure_scl_repo: true
-                  servername: foreman.${HostedZone}
+                  passenger: true
+                  passenger_ruby: /usr/bin/foreman-ruby
+                  passenger_ruby_package:
+                  servername: ${ForemanSubdomain}.${HostedZone}
                   serveraliases:
                     - foreman
                     - ${ForemanSubdomain}
-                  ssl: true
+                  ssl: false
                   custom_repo: true
                   repo: stable
                   gpgcheck: true
@@ -492,22 +675,22 @@ Resources:
                     - puppet
                   rails_env: production
                   puppet_home: /var/lib/puppet
-                  puppet_ssldir: /var/lib/puppet/ssl
+                  puppet_ssldir: /opt/ssl/certs/
                   server_ssl_port: 443
-                  server_ssl_chain: /opt/certs/foreman.${HostedZone}.chain.crt
-                  server_ssl_cert: /opt/certs/foreman.${HostedZone}.crt
-                  server_ssl_certs_dir: /opt/certs/
-                  server_ssl_key: /opt/certs/foreman.${HostedZone}.key
+                  server_ssl_chain: /opt/ssl/certs/ca.pem
+                  server_ssl_cert: /opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem
+                  server_ssl_certs_dir: /opt/ssl/certs/
+                  server_ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}.${HostedZone}.pem
                   server_ssl_crl: ""
-                  client_ssl_ca: /var/lib/puppet/ssl/certs/ca.pem
-                  client_ssl_cert: /var/lib/puppet/ssl/certs/foreman.${HostedZone}.pem
-                  client_ssl_key: /var/lib/puppet/ssl/private_keys/foreman.${HostedZone}.pem
+                  client_ssl_ca: /opt/ssl/certs/ca.pem
+                  client_ssl_cert: /opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem
+                  client_ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}.${HostedZone}.pem
                   admin_username: ${AdminUser}
                   admin_password: ${AdminPassword}
                   admin_email: ${AdminEmail}
                   websockets_encrypt: true
-                  websockets_ssl_key: /var/lib/puppet/ssl/private_keys/foreman.${HostedZone}.pem
-                  websockets_ssl_cert: /var/lib/puppet/ssl/certs/foreman.${HostedZone}.pem
+                  websockets_ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}.${HostedZone}.pem
+                  websockets_ssl_cert: /opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem
                   email_conf: email.yaml
                   email_source: email.yaml.erb
                   email_delivery_method:
@@ -531,16 +714,20 @@ Resources:
                   custom_repo: true
                   http: false
                   ssl: true
-                  ssl_ca: /var/lib/puppet/ssl/certs/ca.pem
-                  ssl_cert: /var/lib/puppet/ssl/certs/foreman.${HostedZone}.pem
-                  ssl_key: /var/lib/puppet/ssl/private_keys/foreman.${HostedZone}.pem
-                  foreman_ssl_ca: /var/lib/puppet/ssl/certs/ca.pem
-                  foreman_ssl_cert: /var/lib/puppet/ssl/certs/foreman.${HostedZone}.pem
-                  foreman_ssl_key: /var/lib/puppet/ssl/private_keys/foreman.${HostedZone}.pem
+                  ssl_ca: /opt/ssl/certs/ca.pem
+                  ssl_cert: /opt/ssl/certs/${ForemanSubdomain}-proxy.${HostedZone}.pem
+                  ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}-proxy.${HostedZone}.pem
+                  foreman_ssl_ca: /opt/ssl/certs/ca.pem
+                  foreman_ssl_cert: /opt/ssl/certs/${ForemanSubdomain}.${HostedZone}.pem
+                  foreman_ssl_key: /opt/ssl/private_keys/${ForemanSubdomain}.${HostedZone}.pem
+                  trusted_hosts:
+                    - foreman.${HostedZone}
+                    - ${ForemanSubdomain}.${HostedZone}
+                    - ${ForemanSubdomain}-proxy.${HostedZone}
                   logs: true
-                  logs_listen_on: http
+                  logs_listen_on: https
                   tftp: true
-                  tftp_listen_on: http
+                  tftp_listen_on: https
                   register_in_foreman: false
                   ssl_disabled_ciphers: []
                   manage_sudoersd: true
@@ -548,11 +735,15 @@ Resources:
                   puppetca: false
                   manage_puppet_group: false
                   puppet: false
-                  foreman_base_url: "https://foreman.${HostedZone}"
-                  dns_server: "8.8.8.8"
+                  foreman_base_url: "https://${ForemanSubdomain}.${HostedZone}"
+                  registered_name: ${ForemanSubdomain}-proxy.${HostedZone}
+                  registered_proxy_url: https://${ForemanSubdomain}-proxy.${HostedZone}:8443
                 puppet: false
-                "foreman::plugin::tasks": true
+                "foreman::plugin::tasks":
+                  package: ruby-foreman-tasks
+                  service: ruby-foreman-tasks
                 "foreman::compute::ec2": true
+                "foreman::plugin::docker": true
                 "foreman::plugin::chef": true
                 "foreman_proxy::plugin::chef":
                   enabled: true
@@ -582,7 +773,7 @@ Resources:
     Type: AWS::CloudFormation::WaitConditionHandle
   WaitCondition:
     Type: AWS::CloudFormation::WaitCondition
-    DependsOn: Ec2Instance
+    DependsOn: ServerLaunchConfig
     Properties:
       Handle:  !Ref WaitHandle
       Timeout: '2300'
